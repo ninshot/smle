@@ -1,6 +1,13 @@
 import random
 import numpy as np
-import torch
+
+try:
+    import torch
+except ImportError as e:
+    raise RuntimeError(
+        "Torch is required for this feature. "
+        "Install it yourself (GPU/CPU) or use 'pip install smle[torch]'."
+    ) from e
 
 def set_seed(seed: int):
     """

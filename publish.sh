@@ -9,7 +9,7 @@ cd "$ROOT_DIR"
 rm -rf dist
 rm -rf src/smle.egg-info
 
-#  python -m pip install build
+# python -m pip install build
 python -m build
-#python -m pip install twine
+# python -m pip install twine
 python -m twine upload dist/*

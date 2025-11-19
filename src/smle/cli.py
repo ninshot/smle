@@ -2,7 +2,7 @@
 import argparse
 from pathlib import Path
 
-SMLE_CONFIG_TEMPLATE = """
+SMLE_CONFIG_TEMPLATE = """\
 project: [name]
 
 # Dataset settings
@@ -30,8 +30,7 @@ wandb:
   entity: [your_wandb_account]
 """
 
-EXAMPLE_MAIN_SCRIPT = """
-
+EXAMPLE_MAIN_SCRIPT = """\
 from smle.utils import set_seed
 from smle import smle
 

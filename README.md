@@ -1,1 +1,2 @@
-# SMLE – Simple Machine Learning Essentials
+# SMLE – Simple Machine Learning Enviroment
+
