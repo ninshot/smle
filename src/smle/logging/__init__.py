@@ -1,102 +1,76 @@
 import builtins
-from typing import Optional, TextIO
 import os
+import re
 from datetime import datetime
 import wandb
+from colorama import Fore, Style
+import sys
 
-_builtin_print = builtins.print
-_log_file: str | None = None      # global log file path
-_use_wandb: bool = False
+class Logger:
 
-_wandb_session = None
+    def __init__(self, args):
 
-# ============================ #
+        self._args = args
+        self._log_filename = f'{args["project"]}_{args["session_id"]}.log'
+        self._log_filepath = args["logger"]["dir"]
+        self._log_file = os.path.join(self._log_filepath, self._log_filename)
+        self._original_print = builtins.print
+        self._wandb_run = None
 
-def enable_smle_print() -> None:
-    builtins.print = _log_print  # type: ignore[assignment]
+        # Regex to strip ANSI color codes for the log file
+        self._ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 
-def disable_smle_print() -> None:
-    builtins.print = _builtin_print  # type: ignore[assignment]
+        os.makedirs(args["logger"]["dir"], exist_ok=True)
 
-def _log_print(*objects: object, sep: str = " ", end: str = "\n", file: Optional[TextIO] = None, flush: bool = False) -> None:
-    """Log to file with timestamp and echo to stdout (mimicking built-in print signature)."""
+    def start(self):
+        # 1. Create/Wipe log file
+        with open(self._log_file, "w", encoding="utf-8") as f:
+            f.write("")
 
-    message = sep.join(map(str, objects))
+        print(f"{Fore.GREEN}[SMLE] Logging file {Fore.LIGHTYELLOW_EX}{self._log_filename}{Fore.GREEN} created in {Fore.LIGHTYELLOW_EX}{self._log_filepath}{Fore.GREEN} directory.{Style.RESET_ALL}")
+        # 2. Hijack print
+        builtins.print = self._log_print
 
-    # Log to file
-    if _log_file is not None:
-        timestamp = datetime.now().replace(microsecond=0).isoformat(sep=" ")
-        log_line = f"[{timestamp}] {message}\n"
-        with open(_log_file, "a", encoding="utf-8") as f:
-            f.write(log_line)
+        # 4. Init WandB (Silently)
+        if self._args["logger"].get("use_wandb"):
+            self._init_wandb()
 
-    # Pass all original arguments (including file/flush) to the real print
-    _builtin_print(*objects, sep=sep, end=end, file=file, flush=flush)
+    def stop(self):
+        builtins.print = self._original_print
+        if self._wandb_run:
+            self._wandb_run.finish()
 
-# ============================== #
+    def _log_print(self, *objects, sep=" ", end="\n", file=None, flush=False):
+        message = sep.join(map(str, objects))
 
-def init_logging_module(args: dict) -> None:
+        # 1. Write Clean Text to File (Strip Colors)
+        if self._log_file and "[SMLE]" not in message:
+            clean_message = self._ansi_escape.sub('', message)
+            timestamp = datetime.now().replace(microsecond=0).isoformat(sep=" ")
+            with open(self._log_file, "a", encoding="utf-8") as f:
+                f.write(f"[{timestamp}] {clean_message}\n")
 
-    builtins.print = _log_print
+        # 2. Write Colored Text to Console
+        self._original_print(*objects, sep=sep, end=end, file=file, flush=flush)
 
-    export_dir = args["logger"]["dir"]
-    os.makedirs(export_dir, exist_ok=True)
+    def _init_wandb(self):
+        os.environ["WANDB_SILENT"] = "true" # Silence WandB
 
-    filename = f'{args["project"]}.log'
-    global _log_file
-    _log_file = os.path.join(export_dir, filename)
+        wandb_conf = self._args.get("wandb", {})
+        os.environ["WANDB_API_KEY"] = wandb_conf.get("key", "")
 
-    # truncate log
-    with open(_log_file, "w", encoding="utf-8") as f:
-        f.write("")
-
-    for k, v in _flatten_dict(args).items():
-        print(f"{k}: {v}")
-
-    if "use_wandb" in args["logger"]:
-        if args["logger"]["use_wandb"]:
-
-            global _use_wandb
-            _use_wandb = True
-            _start_wandb_session(
-                key=args["wandb"]["key"],
-                entity=args["wandb"]["entity"],
-                project=args["project"],
-                config=args["training"],
+        try:
+            self._wandb_run = wandb.init(
+                entity=wandb_conf.get("entity"),
+                project=self._args.get("project"),
+                config=self._args.get("training"),
+                name=self._args.get("session_id")
             )
 
+            print(f"{Fore.GREEN}[SMLE] Wandb session initialized.{Style.RESET_ALL}")
 
-def close_logging_module():
-
-    builtins.print = _builtin_print
-
-    if _use_wandb and _wandb_session:
-        _wandb_session.finish()
-
-# ========================== #
-
-def _start_wandb_session(
-    key: str,
-    entity: str,
-    project: str,
-    config,
-) -> None:
-    os.environ["WANDB_API_KEY"] = key
-
-    global _wandb_session
-    _wandb_session = wandb.init(
-        entity=entity,
-        project=project,
-        config=config,
-    )
-
-def _flatten_dict(d: dict, parent_key: str = "", sep: str = "/") -> dict:
-    """Flatten nested dictionary into a single-level dict with sep-joined keys."""
-    items = []
-    for k, v in d.items():
-        new_key = f"{parent_key}{sep}{k}" if parent_key else k
-        if isinstance(v, dict):
-            items.extend(_flatten_dict(v, new_key, sep=sep).items())
-        else:
-            items.append((new_key, v))
-    return dict(items)
+        except:
+            print(f"{Fore.RED}[SMLE] Failed to start wandb session.{Style.RESET_ALL}")
+            print(f"{Fore.RED}[SMLE] Please check your wandb configuration in your yaml file.{Style.RESET_ALL}")
+            print(f"{Fore.RED}[SMLE] Please ensure your internet connection is up-and-running.{Style.RESET_ALL}")
+            sys.exit(1)
